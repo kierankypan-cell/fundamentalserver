@@ -1,0 +1,16 @@
+# Docker build 时不拷进镜像 — 避免镜像变大 + 不让密钥进镜像层
+.env
+.env.*
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+history/
+.vscode/
+.idea/
+*.md
+Dockerfile
+docker-compose.yaml
+.dockerignore

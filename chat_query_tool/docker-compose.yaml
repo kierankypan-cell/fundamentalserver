@@ -1,0 +1,63 @@
+# Compose 文件：本地启动 / 内网服务器部署都能用
+#   首次：    docker compose up -d --build
+#   更新代码： docker compose up -d --build
+#   看日志：   docker compose logs -f
+#   停掉：    docker compose down
+
+services:
+  chat-audit:
+    # build: .          表示用当前目录的 Dockerfile 构建镜像
+    # 也可以指定 dockerfile 路径，这里默认就是 ./Dockerfile
+    build: .
+
+    # 给构建出的镜像打个 tag，docker images 里看着清楚
+    image: chat-audit:latest
+
+    # 容器名，默认是 dirname_servicename_1，丑而且重复 build 会冲突
+    container_name: chat-audit
+
+    # 宿主机端口 : 容器端口
+    # 内网部署：把宿主机的 8501 暴露给同事访问
+    # 想换成 80 端口走 nginx 反代时，可以改成 "127.0.0.1:8501:8501" 只让本机 nginx 访问
+    ports:
+      - "8501:8501"
+
+    # 把项目根的 .env 整个注入容器为环境变量
+    # 容器内 db.py / analyzer.py 通过 os.environ.get() 直接读到
+    # .env 不会被打进镜像（.dockerignore 已排除），更不会推到 GitHub（.gitignore 已排除）
+    env_file:
+      - .env
+
+    # 数据持久化：宿主机 ./history ↔ 容器 /app/history
+    #   - 容器删掉重建，历史查询不丢
+    #   - 宿主机可以直接 cp 走做备份
+    #   - 如果换机器，把 ./history 整个目录搬过去就行
+    volumes:
+      - ./history:/app/history
+
+    # 重启策略：
+    #   no              不自动重启
+    #   always          总是重启（包括手动 stop 之后再启动 docker daemon 也会拉起，太激进）
+    #   on-failure      只有崩溃才重启
+    #   unless-stopped  崩溃 / docker daemon 重启会自动拉起，但 docker stop 后保持停止 ← 推荐
+    restart: unless-stopped
+
+    # 时区设为上海，方便日志和 history 文件名时间对得上
+    environment:
+      - TZ=Asia/Shanghai
+
+    # 资源限制（可选，防止跑飞占满整台机器）
+    # deploy 块在 docker-compose 单机模式下需要 --compatibility 才生效，
+    # 想用就把下面注释打开并加上 --compatibility 参数
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "2.0"
+    #       memory: 2G
+
+    # 日志限制：默认无限增长，重启容器会拷贝旧日志，机器迟早磁盘炸
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"     # 单个日志文件最大 10MB
+        max-file: "3"       # 保留 3 个历史文件，总共最多 30MB

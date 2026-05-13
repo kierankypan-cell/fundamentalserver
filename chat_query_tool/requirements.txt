@@ -1,0 +1,18 @@
+# Streamlit 网页框架
+streamlit>=1.40
+
+# 数据处理 + Excel 导出
+pandas
+openpyxl
+
+# 读取 .env 文件
+python-dotenv
+
+# Claude API 官方 SDK
+anthropic>=0.40
+
+# Kyuubi / Hive 连接：pyhive 通过 thrift + thrift_sasl 走 LDAP
+pyhive
+thrift
+thrift_sasl
+sasl
