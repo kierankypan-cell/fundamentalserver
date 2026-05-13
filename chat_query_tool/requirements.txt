@@ -12,7 +12,7 @@ python-dotenv
 anthropic>=0.40
 
 # Kyuubi / Hive 连接：pyhive 通过 thrift + thrift_sasl 走 LDAP
+# 不要装 sasl（C 扩展，Py3.10+ 编译挂）；thrift_sasl 会自动用 pure-sasl 纯 Python 实现
 pyhive
 thrift
 thrift_sasl
-sasl
