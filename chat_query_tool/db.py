@@ -19,6 +19,7 @@ db.py —— Kyuubi 查询封装
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -140,6 +141,36 @@ def _build_configuration() -> dict:
 
 
 # ============================================================
+# 错误信息整理
+# ============================================================
+
+def _format_kyuubi_error(raw: str | None) -> str:
+    """
+    Kyuubi 抛回来的 errorMessage 是整坨 Java 堆栈，UI 直显会吓人。
+    抽出最里层的 root cause，对几个已知模式给一句中文提示。
+    """
+    if not raw:
+        return '未知错误（Kyuubi 返回空 errorMessage）'
+
+    # 取最后一个 "Caused by:" 后那一行；没有就退化到首行
+    causes = re.findall(r'Caused by:\s*([^\n]+)', raw)
+    root = (causes[-1] if causes else raw.splitlines()[0]).strip()
+
+    if len(root) > 400:
+        root = root[:400] + ' ...(已截断)'
+
+    # 已知错误模式 → 友好提示
+    if 'SocketTimeoutException' in raw and 'TqsAnalyzer' in raw:
+        return f'Kyuubi 鉴权服务（TQS）超时，通常重试 1-2 次即可。\n（原始：{root}）'
+    if 'not registered' in root or 'Function not found' in root:
+        return f'SQL 函数在当前 engine 不可用：{root}'
+    if 'AuthenticationException' in raw or 'LDAP' in raw:
+        return f'Kyuubi 鉴权失败，检查 .env 的 KYUUBI_USER / KYUUBI_PASSWORD：{root}'
+
+    return root
+
+
+# ============================================================
 # 单条 SQL 执行
 # ============================================================
 
@@ -166,7 +197,7 @@ def _run_sql(sql: str) -> pd.DataFrame:
         status = cursor.poll().operationState
 
     if status == TOperationState.ERROR_STATE:
-        raise RuntimeError(f'Kyuubi 查询失败：{cursor.poll().errorMessage}')
+        raise RuntimeError(_format_kyuubi_error(cursor.poll().errorMessage))
 
     cols = [d[0] for d in cursor.description]
     return pd.DataFrame(cursor.fetchall(), columns=cols)
