@@ -20,7 +20,13 @@ import pandas as pd
 import streamlit as st
 
 from analyzer import analyze_in_battle, analyze_out_battle
-from db import query_country, query_in_battle, query_out_battle
+from db import (
+    MAX_CONCURRENT_USERS,
+    active_user_count,
+    query_user_chats,
+    release_slot,
+    try_acquire_slot,
+)
 from prompts import COUNTRY_LANGUAGE
 import history
 
@@ -405,29 +411,42 @@ if submitted:
     df_out = pd.DataFrame()
     country: str | None = None
 
-    with st.status("正在查询数据库 + 检测国家...", expanded=True) as status:
+    with st.status("准备查询...", expanded=True) as status:
+        # ── Step 0: 排队获取并发配额（同时最多 MAX_CONCURRENT_USERS 个用户在查）
+        ahead = active_user_count()
+        if ahead >= MAX_CONCURRENT_USERS:
+            status.update(label=f"⏳ 当前有 {ahead} 人正在查询，排队中...")
+
+        waited = 0
+        acquired = False
+        while not acquired:
+            acquired = try_acquire_slot(timeout=2)
+            if not acquired:
+                waited += 2
+                ahead = active_user_count()
+                status.update(label=f"⏳ 前方还有 {ahead} 人在查询，已等 {waited}s...")
+
+        # ── Step 1: 拿到配额后并发跑三条 SQL（finally 必释放配额）
         try:
-            st.write("📍 检测玩家国家（geoip 最近一次登录的 client_ip）...")
-            country = query_country(roleid, zoneid, start_ymd, end_ymd)
+            status.update(label="并发执行：geoip 检测 + 战斗内 + 战斗外...")
+            country, df_out, df_in = query_user_chats(
+                roleid, zoneid, start_ymd, end_ymd
+            )
+
             if country:
                 lang = COUNTRY_LANGUAGE.get(country, "未在常见列表内")
-                st.write(f"    → 国家 `{country}`（主要语言：{lang}）")
+                st.write(f"📍 国家 `{country}`(主要语言：{lang})")
             else:
-                st.write("    → ⚠️ 未找到登录记录或 IP 无法定位，翻译时不附加语言提示")
+                st.write("📍 ⚠️ 未找到登录记录或 IP 无法定位，翻译时不附加语言提示")
 
-            st.write("📥 战斗外（含 zoneid 过滤）...")
-            df_out = query_out_battle(roleid, zoneid, start_ymd, end_ymd)
-            st.write(f"    → 返回 {len(df_out)} 条")
-
-            st.write("📥 战斗内（无 zoneid，按 sender 过滤）...")
-            df_in = query_in_battle(roleid, start_ymd, end_ymd)
-            st.write(f"    → 返回 {len(df_in)} 条")
-
+            st.write(f"📥 战斗外 {len(df_out)} 条 / 战斗内 {len(df_in)} 条")
             status.update(label="数据库查询完成 ✓", state="complete")
         except Exception as e:
             status.update(label="数据库查询失败 ✗", state="error")
             st.error(f"数据库查询失败：{e}")
-            st.stop()
+            st.stop()           # st.stop 会抛特殊异常，仍会触发下面的 finally
+        finally:
+            release_slot()      # 不论正常 / 异常 / st.stop，配额都准确释放一次
 
     if df_in.empty and df_out.empty:
         st.warning("⚠️ 该玩家在所选时间段内没有任何聊天记录。建议加长时间窗口或检查 roleid / zoneid。")
