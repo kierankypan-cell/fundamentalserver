@@ -28,6 +28,15 @@ from db import (
     try_acquire_slot,
 )
 from prompts import COUNTRY_LANGUAGE
+from ui_helpers import (
+    _validate,
+    _highlight_risk,
+    _to_display,
+    _summary,
+    _overview_table,
+    _shield_table,
+    _breakdown,
+)
 import history
 
 
@@ -51,7 +60,18 @@ if "view_id" not in st.session_state:
 # 侧边栏：历史记录
 # ============================================================
 
+# 隐藏 streamlit 自动从 pages/ 目录推断出的侧边栏导航（默认会显示文件名 "app"），
+# 改用 st.page_link 自己渲染两个链接，可控 label + icon
+st.markdown(
+    "<style>[data-testid='stSidebarNav']{display:none;}</style>",
+    unsafe_allow_html=True,
+)
+
 with st.sidebar:
+    st.page_link("app.py",                       label="发言审查", icon="💬")
+    st.page_link("pages/2_💔_收信审查.py",       label="收信审查", icon="💔")
+    st.divider()
+
     st.header("📜 查询历史")
     st.caption(f"最多保留 {history.MAX_HISTORY} 条 · 落盘到 chat_query_tool/history/")
 
@@ -119,32 +139,8 @@ with st.form("query_form"):
 
 
 # ============================================================
-# 工具函数
+# 工具函数（页面专属；通用辅助见 ui_helpers.py）
 # ============================================================
-
-def _validate(roleid_str: str, zoneid_str: str, start_d: date, end_d: date):
-    if not roleid_str.strip() or not zoneid_str.strip():
-        st.error("请填写 roleid 和 zoneid")
-        st.stop()
-    try:
-        roleid = int(roleid_str.strip())
-        zoneid = int(zoneid_str.strip())
-    except ValueError:
-        st.error("roleid 和 zoneid 必须为整数")
-        st.stop()
-    if start_d > end_d:
-        st.error("开始日期必须早于或等于结束日期")
-        st.stop()
-    return roleid, zoneid
-
-
-def _highlight_risk(row):
-    level = int(row.get("风险等级", 0))
-    if level >= 3: return ["background-color: #ffcccc"] * len(row)
-    if level == 2: return ["background-color: #ffe0b3"] * len(row)
-    if level == 1: return ["background-color: #fff5cc"] * len(row)
-    return [""] * len(row)
-
 
 def _enrich(df: pd.DataFrame, results: list[dict]) -> pd.DataFrame:
     df = df.copy()
@@ -153,50 +149,6 @@ def _enrich(df: pd.DataFrame, results: list[dict]) -> pd.DataFrame:
     df["risk_type"]   = [r["risk_type"]   for r in results]
     df["risk_reason"] = [r["risk_reason"] for r in results]
     return df
-
-
-def _to_display(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    out = df.rename(columns={
-        "time":          "时间",
-        "content":       "原文",
-        "translation":   "翻译",
-        "risk_level":    "风险等级",
-        "risk_type":     "风险类型",
-        "is_shield":     "是否被屏蔽",
-        "risk_reason":   "风险原因",
-        "chat_language": "频道",
-        "chat_type":     "聊天类型",
-    })
-    cols = ["时间", "原文", "翻译", "风险等级", "风险类型", "是否被屏蔽",
-            "风险原因", "频道", "聊天类型"]
-    cols = [c for c in cols if c in out.columns]
-    out  = out[cols]
-    return out.sort_values(["风险等级", "时间"], ascending=[False, True]).reset_index(drop=True)
-
-
-def _summary(df: pd.DataFrame, scene_name: str) -> str:
-    if df.empty:
-        return f"{scene_name}：（无聊天记录）"
-    total  = len(df)
-    risky  = int((df["risk_level"] >= 1).sum())
-    severe = int((df["risk_level"] >= 2).sum())
-    visible_risky = int(((df["risk_level"] >= 1)
-                         & (df["is_shield"].astype(int) == 0)).sum())
-    if risky == 0:
-        return f"{scene_name}：✅ 全部正常（共 {total} 条）"
-    icon = "🚨" if severe > 0 else "⚠️"
-    return (f"{scene_name}：{icon} 检测到 {risky} 条违规"
-            f"（严重 {severe} 条，未被屏蔽 {visible_risky} 条）"
-            f"／总 {total} 条")
-
-
-def _fmt_pct(num: int, den: int) -> str:
-    """整数比例格式化为百分比；分母为 0 时返回 '-'。"""
-    if den == 0:
-        return "-"
-    return f"{num / den * 100:.1f}%"
 
 
 def _stats(df: pd.DataFrame) -> dict:
@@ -218,63 +170,6 @@ def _stats(df: pd.DataFrame) -> dict:
         visible_risky = fn,
         tp=tp, fp=fp, fn=fn, tn=tn,
     )
-
-
-def _overview_table(s: dict) -> pd.DataFrame:
-    return pd.DataFrame([
-        {"指标": "总消息数",       "值": str(s["total"])},
-        {"指标": "违规消息（≥1）", "值": str(s["n_risky"])},
-        {"指标": "严重违规（≥2）", "值": str(s["n_severe"])},
-        {"指标": "违规率",         "值": _fmt_pct(s["n_risky"], s["total"])},
-        {"指标": "已屏蔽数",       "值": str(s["n_shielded"])},
-        {"指标": "违规且未屏蔽",   "值": str(s["visible_risky"])},
-    ])
-
-
-def _shield_table(s: dict) -> pd.DataFrame:
-    """以 AI 判断为真值，屏蔽系统的混淆矩阵 + 召回 / 准确率。"""
-    return pd.DataFrame([
-        {"指标": "召回率（TP/(TP+FN)）",
-         "值":   _fmt_pct(s["tp"], s["tp"] + s["fn"]),
-         "说明": "违规中被屏蔽的比例（漏屏蔽得越少越高）"},
-        {"指标": "准确率（TP/(TP+FP)）",
-         "值":   _fmt_pct(s["tp"], s["tp"] + s["fp"]),
-         "说明": "屏蔽里真违规的比例（误屏蔽得越少越高）"},
-        {"指标": "真阳 TP", "值": str(s["tp"]), "说明": "违规 ∩ 屏蔽"},
-        {"指标": "假阳 FP", "值": str(s["fp"]), "说明": "正常 ∩ 屏蔽（误屏蔽）"},
-        {"指标": "假阴 FN", "值": str(s["fn"]), "说明": "违规 ∩ 未屏蔽（漏屏蔽）"},
-        {"指标": "真阴 TN", "值": str(s["tn"]), "说明": "正常 ∩ 未屏蔽"},
-    ])
-
-
-def _breakdown(df: pd.DataFrame, by: str) -> pd.DataFrame:
-    """
-    按 by ('risk_level' / 'risk_type') 分组的明细。
-    列：分组 / 消息数 / 占比 / 已屏蔽 / 屏蔽率
-    """
-    total = len(df)
-    if by == "risk_level":
-        col_name = "风险等级"
-        labels   = {0: "0（正常）", 1: "1（轻微）", 2: "2（中度）", 3: "3（严重）"}
-        keys     = [0, 1, 2, 3]
-    else:
-        col_name = "风险类型"
-        keys     = list(df[by].value_counts().index)
-        labels   = {k: str(k) for k in keys}
-
-    rows = []
-    for key in keys:
-        sub      = df[df[by] == key]
-        n        = len(sub)
-        shielded = int((sub["is_shield"].astype(int) == 1).sum()) if n else 0
-        rows.append({
-            col_name: labels[key],
-            "消息数": n,
-            "占比":   _fmt_pct(n, total),
-            "已屏蔽": shielded,
-            "屏蔽率": _fmt_pct(shielded, n),
-        })
-    return pd.DataFrame(rows)
 
 
 def _render_tab(df: pd.DataFrame, scene_name: str, file_prefix: str):

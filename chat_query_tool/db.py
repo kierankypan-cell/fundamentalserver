@@ -293,3 +293,93 @@ def query_user_chats(roleid: int, zoneid: int,
         df_in   = f_in.result()
 
     return country, df_out, df_in
+
+
+# ============================================================
+# 收信审查（玩家被骚扰）—— 三条镜像 SQL
+# ============================================================
+#
+# 与 query_user_chats 的差别：
+#   战斗内：先在 battle_end 找该玩家参与过的 battle_id（哪怕全程沉默也能覆盖），
+#           再回 chat_talk 拉这些局的整局聊天（含本人 + 其他 9 人）；
+#           UI 端按 sender 标记本人/他人，AI 风险分析只针对 sender != roleid 的行。
+#   战斗外：私聊收到（target = roleid 且 sender != roleid），即"别人发给我的"。
+#   country：完全复用 query_country，玩家自身的国家不变。
+#
+# 三条 SQL 仍然并发；签名与 query_user_chats 对齐 (country, df_out, df_in)。
+# ============================================================
+
+def query_received_in_battle(roleid: int,
+                             start_ymd: str, end_ymd: str) -> pd.DataFrame:
+    """
+    战斗内：先在 battle_end 找该玩家参与过的所有 battle_id，
+    再回 chat_talk 拉这些局的整局聊天（含本人发言 + 队友/对手发言）。
+
+    用 battle_end 而不是 chat_talk 自身 self-join：
+    玩家整局沉默时 chat_talk 里没有他的痕迹，但 battle_end 里有；不能用 chat_talk 找会漏。
+    """
+    sql = f"""
+        WITH my_battles AS (
+            SELECT DISTINCT battleid AS battle_id
+            FROM ml_ods.battleserver_battle_end
+            WHERE logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
+              AND accountid = {int(roleid)}
+        )
+        SELECT
+            t.time,
+            t.battle_id,
+            t.sender,
+            t.target,
+            t.chat_type,
+            t.chat_language,
+            t.content,
+            t.is_shield
+        FROM ml_ods.battleserver_chat_talk t
+        JOIN my_battles b ON t.battle_id = b.battle_id
+        WHERE t.logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
+        ORDER BY t.battle_id, t.time
+    """
+    return _run_sql(sql)
+
+
+def query_received_out_battle(roleid: int, zoneid: int,
+                              start_ymd: str, end_ymd: str) -> pd.DataFrame:
+    """战斗外：私聊收到（target = roleid 且 sender != roleid，排除自己发给自己的边界情况）。"""
+    sql = f"""
+        SELECT
+            time,
+            sender,
+            target,
+            chat_type,
+            chat_language,
+            content,
+            is_shield
+        FROM ml_ods.gameserver_chat_talk_v2
+        WHERE logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
+          AND zoneid = {int(zoneid)}
+          AND target = {int(roleid)}
+          AND sender != {int(roleid)}
+        ORDER BY time
+    """
+    return _run_sql(sql)
+
+
+def query_received_chats(roleid: int, zoneid: int,
+                         start_ymd: str, end_ymd: str
+                         ) -> tuple[str | None, pd.DataFrame, pd.DataFrame]:
+    """
+    并发执行 country / received_out / received_in 三条 SQL，
+    返回 (country, df_out, df_in)，签名与 query_user_chats 对齐，方便 UI 同构。
+
+    调用方仍需自行 try_acquire_slot() / release_slot() 管理配额。
+    """
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_country = ex.submit(query_country,             roleid, zoneid, start_ymd, end_ymd)
+        f_out     = ex.submit(query_received_out_battle, roleid, zoneid, start_ymd, end_ymd)
+        f_in      = ex.submit(query_received_in_battle,  roleid,         start_ymd, end_ymd)
+
+        country = f_country.result()
+        df_out  = f_out.result()
+        df_in   = f_in.result()
+
+    return country, df_out, df_in
