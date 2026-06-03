@@ -45,6 +45,7 @@ from ui_helpers import (
     _overview_table,
     _shield_table,
     _breakdown,
+    _render_chat_table_view,
 )
 
 
@@ -210,15 +211,15 @@ def _render_in_battle_received(df: pd.DataFrame, meta: dict):
     # ── 整局聊天明细（本人浅蓝 / 他人按风险高亮）──────────
     st.markdown("**📝 整局聊天明细**（按 battle_id 分组、time 升序）")
     display_df = _to_display_received_in(df, int(meta["roleid"]))
-    st.dataframe(
-        display_df.style.apply(_highlight_in_battle_received, axis=1),
-        use_container_width = True,
-        height              = 480,
+    file_stem = (f"chat_received_{meta['roleid']}_{meta['zoneid']}"
+                 f"_{meta['start']}_{meta['end']}_in")
+    _render_chat_table_view(
+        display_df,
+        highlight_fn = _highlight_in_battle_received,
+        key_prefix   = f"recv_in_{file_stem}",
     )
 
     csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
-    file_stem = (f"chat_received_{meta['roleid']}_{meta['zoneid']}"
-                 f"_{meta['start']}_{meta['end']}_in")
     st.download_button(
         label     = "📥 导出【战斗内整局】CSV",
         data      = csv_bytes,
@@ -274,15 +275,15 @@ def _render_out_battle_received(df: pd.DataFrame, meta: dict):
 
     st.markdown("**📝 私聊收件明细**")
     display_df = _to_display_received_out(df)
-    st.dataframe(
-        display_df.style.apply(_highlight_risk, axis=1),
-        use_container_width = True,
-        height              = 480,
+    file_stem = (f"chat_received_{meta['roleid']}_{meta['zoneid']}"
+                 f"_{meta['start']}_{meta['end']}_out")
+    _render_chat_table_view(
+        display_df,
+        highlight_fn = _highlight_risk,
+        key_prefix   = f"recv_out_{file_stem}",
     )
 
     csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
-    file_stem = (f"chat_received_{meta['roleid']}_{meta['zoneid']}"
-                 f"_{meta['start']}_{meta['end']}_out")
     st.download_button(
         label     = "📥 导出【战斗外收件】CSV",
         data      = csv_bytes,

@@ -36,6 +36,7 @@ from ui_helpers import (
     _overview_table,
     _shield_table,
     _breakdown,
+    _render_chat_table_view,
 )
 import history
 
@@ -217,10 +218,10 @@ def _render_tab(df: pd.DataFrame, scene_name: str, file_prefix: str):
     # ── 聊天明细 ──────────────────────────────────────────
     st.markdown("**📝 聊天明细**")
     display_df = _to_display(df)
-    st.dataframe(
-        display_df.style.apply(_highlight_risk, axis=1),
-        use_container_width = True,
-        height              = 480,
+    _render_chat_table_view(
+        display_df,
+        highlight_fn = _highlight_risk,
+        key_prefix   = f"chat_{file_prefix}",
     )
 
     csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
