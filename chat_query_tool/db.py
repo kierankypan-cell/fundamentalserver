@@ -209,15 +209,22 @@ def _run_sql(sql: str) -> pd.DataFrame:
 
 def query_country(roleid: int, zoneid: int,
                   start_ymd: str, end_ymd: str) -> str | None:
-    """通过最近一次登录的 client_ip 推断玩家国家（geoip 二字母代码）。"""
+    """
+    通过最近一次登录的 client_ip 推断玩家国家（geoip 二字母代码）。
+
+    **不硬过滤 zoneid**：一个 roleid 可能跨多个区，用户输错 zoneid（或该区那天没登录）
+    时硬卡 zoneid 会匹配不到任何登录记录，国家直接变 ?，连带翻译语言提示也丢。
+    这里只按 roleid 拉登录、用 ORDER BY 让「输入的 zoneid 命中的登录」优先（更精确），
+    没命中则回退到该 roleid 任意区最近一次登录来定国家——尽可能找到玩家所在国家。
+    （与聊天查询「按 roleid 拉、不硬卡 zoneid」的健壮性策略一致。）
+    """
     sql = f"""
         SELECT geoip(client_ip, 1) AS country
         FROM ml_ods.gameserver_login
         WHERE logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
           AND roleid = {int(roleid)}
-          AND zoneid = {int(zoneid)}
           AND client_ip IS NOT NULL
-        ORDER BY time DESC
+        ORDER BY (CASE WHEN zoneid = {int(zoneid)} THEN 0 ELSE 1 END), time DESC
         LIMIT 1
     """
     df = _run_sql(sql)
