@@ -29,13 +29,15 @@ services:
       - .env
 
     # 数据持久化：宿主机 ./history ↔ 容器 /app/history（发件历史）
-    # 收信审查页面用独立目录 ./history_received（不与发件历史串味）
-    #   - 容器删掉重建，历史查询不丢
+    # 收信审查页面用独立目录 ./history_received、私聊审查页面用 ./history_private
+    # （三个目录互不串味）
+    #   - 容器删掉重建，历史查询不丢（每个落盘目录都必须在这里挂 volume，否则重建即丢）
     #   - 宿主机可以直接 cp 走做备份
-    #   - 如果换机器，把 ./history 和 ./history_received 整个目录搬过去就行
+    #   - 如果换机器，把这三个目录整个搬过去就行
     volumes:
       - ./history:/app/history
       - ./history_received:/app/history_received
+      - ./history_private:/app/history_private
 
     # 重启策略：
     #   no              不自动重启
