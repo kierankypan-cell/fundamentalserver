@@ -80,7 +80,7 @@ st.markdown(
 with st.sidebar:
     st.page_link("app.py",                       label="发言审查", icon="💬")
     st.page_link("pages/2_💔_收信审查.py",       label="收信审查", icon="💔")
-    st.page_link("pages/3_💬_私聊审查.py",       label="私聊审查", icon="🗨️")
+    st.page_link("pages/3_💬_私聊审查.py",       label="私聊审查", icon="🙉")
     st.divider()
 
     st.header("📜 收信查询历史")

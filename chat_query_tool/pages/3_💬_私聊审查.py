@@ -1,5 +1,5 @@
 """
-pages/3_🗨️_私聊审查.py —— 玩家私聊审查（点对点私聊回溯）
+pages/3_🙉_私聊审查.py —— 玩家私聊审查（点对点私聊回溯）
 
 镜像 app.py / 收信审查 的查询模型，但聚焦"点对点私聊"：
   拉出该玩家在时间段内的所有私聊（双向：他发出的 + 别人发给他的），
@@ -51,7 +51,7 @@ from ui_helpers import _validate
 
 st.set_page_config(
     page_title = "私聊审查",
-    page_icon  = "🗨️",
+    page_icon  = "🙉",
     layout     = "wide",
 )
 
@@ -66,14 +66,23 @@ if "private_view_id" not in st.session_state:
 # ============================================================
 
 st.markdown(
-    "<style>[data-testid='stSidebarNav']{display:none;}</style>",
+    """
+    <style>
+    [data-testid='stSidebarNav']{display:none;}
+    /* 私聊详情弹窗：压窄 + 拉高，一屏多显聊天 */
+    div[data-testid="stDialog"] div[role="dialog"]{
+        width: 600px !important;
+        max-width: 94vw !important;
+    }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
 with st.sidebar:
     st.page_link("app.py",                       label="发言审查", icon="💬")
     st.page_link("pages/2_💔_收信审查.py",       label="收信审查", icon="💔")
-    st.page_link("pages/3_💬_私聊审查.py",       label="私聊审查", icon="🗨️")
+    st.page_link("pages/3_💬_私聊审查.py",       label="私聊审查", icon="🙉")
     st.divider()
 
     st.header("📜 私聊查询历史")
@@ -112,7 +121,7 @@ with st.sidebar:
 # 主区：标题 + 输入表单
 # ============================================================
 
-st.title("🗨️ 玩家私聊审查工具")
+st.title("🙉 玩家私聊审查工具")
 st.caption("拉出该玩家与每个对象的全部点对点私聊，按主要语言翻译；点对象看类微信对话气泡")
 
 mode = st.radio("时长模式", ["预设时长", "自定义日期"],
@@ -159,7 +168,7 @@ with st.form("priv_query_form"):
 # 弹窗：单个对象的微信式对话
 # ============================================================
 
-@st.dialog("🗨️ 私聊详情", width="large")
+@st.dialog("🙉 私聊详情", width="large")
 def _conversation_dialog(df_partner: pd.DataFrame, roleid: int, partner_id: int):
     n      = len(df_partner)
     n_send = int((df_partner["sender"].astype("int64") == int(roleid)).sum())

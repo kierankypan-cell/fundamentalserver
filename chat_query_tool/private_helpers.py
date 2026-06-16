@@ -215,7 +215,7 @@ def _bubble(content: str, translation: str, time_str: str,
 
     return (
         f'<div style="display:flex;justify-content:{align};margin:2px 0;">'
-        f'<div style="max-width:74%;">'
+        f'<div style="max-width:82%;">'
         f'<div style="font-size:10.5px;color:#999;margin:0 4px 2px;'
         f'text-align:{"right" if is_self else "left"};">{_html.escape(time_str)}</div>'
         f'<div style="background:{bg};border:{border};border-radius:8px;'
@@ -249,7 +249,7 @@ def render_conversation_html(df_partner: pd.DataFrame, roleid: int) -> str:
 
     return (
         '<div style="display:flex;flex-direction:column;gap:6px;padding:14px;'
-        'background:#ededed;border-radius:8px;max-height:60vh;overflow-y:auto;">'
+        'background:#ededed;border-radius:8px;max-height:76vh;overflow-y:auto;">'
         + "".join(bubbles) +
         '</div>'
     )
