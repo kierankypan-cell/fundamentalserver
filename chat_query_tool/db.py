@@ -232,19 +232,25 @@ def query_country(roleid: int, zoneid: int,
 
 def query_out_battle(roleid: int, zoneid: int,
                      start_ymd: str, end_ymd: str) -> pd.DataFrame:
-    """战斗外聊天（gameserver_chat_talk_v2 有 zoneid）。"""
+    """
+    战斗外聊天（gameserver_chat_talk_v2，game 服，按区区分）。
+
+    一个 roleid 可在多个区有角色，roleid + zoneid 才唯一定位一个角色。这里**只按 roleid 拉取**、
+    不在 SQL 里硬过滤 zoneid，并把 zoneid 列一并取出——这样即使用户输错区服 / 该区无发言，也
+    不会直接 0 条；由上层 UI 用输入的 zoneid 标记「非目标区服」的行（可能是该账号在别区的角色）。
+    """
     sql = f"""
         SELECT
             time,
+            zoneid,
             chat_type,
             chat_language,
             content,
             is_shield
         FROM ml_ods.gameserver_chat_talk_v2
         WHERE logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
-          AND zoneid = {int(zoneid)}
           AND sender = {int(roleid)}
-        ORDER BY time
+        ORDER BY zoneid, time
     """
     return _run_sql(sql)
 
@@ -272,25 +278,38 @@ def query_in_battle(roleid: int,
 # ============================================================
 
 def query_user_chats(roleid: int, zoneid: int,
-                     start_ymd: str, end_ymd: str
+                     start_ymd: str, end_ymd: str,
+                     scope: str = "all"
                      ) -> tuple[str | None, pd.DataFrame, pd.DataFrame]:
     """
     并发执行 country / out / in 三条 SQL，返回 (country, df_out, df_in)。
+
+    scope 控制查询范围（省掉不需要的 SQL）：
+      "all"（默认）—— 战斗内 + 战斗外都查；
+      "in"        —— 仅战斗内，df_out 返回空；
+      "out"       —— 仅战斗外，df_in 返回空。
+    country 始终查询（开销小，翻译语言提示和页头展示都要用）。
 
     调用方需先用 try_acquire_slot() / release_slot() 获取配额（让上层能控制 UI 排队提示）；
     或者直接用 with _acquire_user_slot() 包住调用。
 
     本函数本身不再 acquire，避免双重计数。
     """
+    df_out = pd.DataFrame()
+    df_in  = pd.DataFrame()
     with ThreadPoolExecutor(max_workers=3) as ex:
         f_country = ex.submit(query_country,    roleid, zoneid, start_ymd, end_ymd)
-        f_out     = ex.submit(query_out_battle, roleid, zoneid, start_ymd, end_ymd)
-        f_in      = ex.submit(query_in_battle,  roleid,         start_ymd, end_ymd)
+        f_out = (ex.submit(query_out_battle, roleid, zoneid, start_ymd, end_ymd)
+                 if scope in ("all", "out") else None)
+        f_in  = (ex.submit(query_in_battle,  roleid,         start_ymd, end_ymd)
+                 if scope in ("all", "in") else None)
 
-        # 任何一个抛错都会冒泡上来；其它两个会被 ThreadPoolExecutor 退出时取消
+        # 任何一个抛错都会冒泡上来；其它会被 ThreadPoolExecutor 退出时取消
         country = f_country.result()
-        df_out  = f_out.result()
-        df_in   = f_in.result()
+        if f_out is not None:
+            df_out = f_out.result()
+        if f_in is not None:
+            df_in = f_in.result()
 
     return country, df_out, df_in
 
@@ -372,21 +391,31 @@ def query_received_out_battle(roleid: int, zoneid: int,
 
 
 def query_received_chats(roleid: int, zoneid: int,
-                         start_ymd: str, end_ymd: str
+                         start_ymd: str, end_ymd: str,
+                         scope: str = "all"
                          ) -> tuple[str | None, pd.DataFrame, pd.DataFrame]:
     """
     并发执行 country / received_out / received_in 三条 SQL，
     返回 (country, df_out, df_in)，签名与 query_user_chats 对齐，方便 UI 同构。
 
+    scope 同 query_user_chats："all"（默认）/ "in"（仅战斗内）/ "out"（仅战斗外）；
+    被排除的场景返回空 DataFrame，country 始终查询。
+
     调用方仍需自行 try_acquire_slot() / release_slot() 管理配额。
     """
+    df_out = pd.DataFrame()
+    df_in  = pd.DataFrame()
     with ThreadPoolExecutor(max_workers=3) as ex:
         f_country = ex.submit(query_country,             roleid, zoneid, start_ymd, end_ymd)
-        f_out     = ex.submit(query_received_out_battle, roleid, zoneid, start_ymd, end_ymd)
-        f_in      = ex.submit(query_received_in_battle,  roleid,         start_ymd, end_ymd)
+        f_out = (ex.submit(query_received_out_battle, roleid, zoneid, start_ymd, end_ymd)
+                 if scope in ("all", "out") else None)
+        f_in  = (ex.submit(query_received_in_battle,  roleid,         start_ymd, end_ymd)
+                 if scope in ("all", "in") else None)
 
         country = f_country.result()
-        df_out  = f_out.result()
-        df_in   = f_in.result()
+        if f_out is not None:
+            df_out = f_out.result()
+        if f_in is not None:
+            df_in = f_in.result()
 
     return country, df_out, df_in

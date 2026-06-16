@@ -40,6 +40,8 @@ from received_helpers import (
     _summary_received,
 )
 from ui_helpers import (
+    SCOPE_OPTIONS,
+    SCOPE_TO_CODE,
     _validate,
     _highlight_risk,
     _overview_table,
@@ -151,6 +153,10 @@ with st.form("recv_query_form"):
             end_d   = st.date_input("结束日期",
                                     value=date.today(),
                                     key="recv_end_d")
+
+    scope_label = st.radio("查询范围", SCOPE_OPTIONS, horizontal=True,
+                           key="recv_scope")
+    scope = SCOPE_TO_CODE[scope_label]
 
     submitted = st.form_submit_button("🔍 查询",
                                       type="primary", use_container_width=True)
@@ -301,11 +307,15 @@ def _render_received_results(meta: dict, df_in: pd.DataFrame, df_out: pd.DataFra
     country   = meta.get("country") or "?"
     lang_hint = COUNTRY_LANGUAGE.get((country or "").upper(), "未知")
     ts        = meta.get("ts", "")[:19].replace("T", " ")
+    scope     = meta.get("scope", "all")    # 旧历史无此字段，默认全部
+    show_in   = scope in ("all", "in")
+    show_out  = scope in ("all", "out")
 
+    scope_note = {"in": "（仅战斗内）", "out": "（仅战斗外）"}.get(scope, "")
     st.markdown(
         f"### 玩家 `{meta['roleid']}` (zone `{meta['zoneid']}`) · "
         f"国家 `{country}`(主要语言:{lang_hint}) · "
-        f"`{meta['start']}` → `{meta['end']}`"
+        f"`{meta['start']}` → `{meta['end']}` {scope_note}"
     )
     st.caption(f"查询时间：{ts}")
 
@@ -315,12 +325,14 @@ def _render_received_results(meta: dict, df_in: pd.DataFrame, df_out: pd.DataFra
 
     st.markdown("---")
     st.subheader("📋 总览结论")
-    st.markdown(
-        f"- {_summary_received(df_in,  '**战斗内**')}\n"
-        f"- {_summary_received(df_out, '**战斗外**')}"
-    )
+    bullets = []
+    if show_in:
+        bullets.append(f"- {_summary_received(df_in,  '**战斗内**')}")
+    if show_out:
+        bullets.append(f"- {_summary_received(df_out, '**战斗外**')}")
+    st.markdown("\n".join(bullets))
 
-    excel_bytes = build_excel_received(df_in, df_out, int(meta["roleid"]))
+    excel_bytes = build_excel_received(df_in, df_out, int(meta["roleid"]), scope)
     st.download_button(
         label     = "📦 导出完整收信报告 (Excel · 双 Sheet)",
         data      = excel_bytes,
@@ -332,10 +344,15 @@ def _render_received_results(meta: dict, df_in: pd.DataFrame, df_out: pd.DataFra
     )
 
     st.markdown("---")
-    tab_in, tab_out = st.tabs(["⚔️ 战斗内整局", "🌐 战斗外私聊收件"])
-    with tab_in:
+    if show_in and show_out:
+        tab_in, tab_out = st.tabs(["⚔️ 战斗内整局", "🌐 战斗外私聊收件"])
+        with tab_in:
+            _render_in_battle_received(df_in, meta)
+        with tab_out:
+            _render_out_battle_received(df_out, meta)
+    elif show_in:
         _render_in_battle_received(df_in, meta)
-    with tab_out:
+    else:
         _render_out_battle_received(df_out, meta)
 
 
@@ -369,7 +386,7 @@ if submitted:
         try:
             status.update(label="并发执行：geoip 检测 + 战斗内整局 + 战斗外收件...")
             country, df_out, df_in = query_received_chats(
-                roleid, zoneid, start_ymd, end_ymd
+                roleid, zoneid, start_ymd, end_ymd, scope
             )
 
             if country:
@@ -424,7 +441,8 @@ if submitted:
             st.error(f"战斗内分析失败：{e}")
             st.stop()
 
-    qid = hist.save(roleid, zoneid, country, start_ymd, end_ymd, df_in, df_out)
+    qid = hist.save(roleid, zoneid, country, start_ymd, end_ymd,
+                    df_in, df_out, scope=scope)
     st.session_state.received_history = hist.list_all()
     st.session_state.received_view_id = qid
     st.rerun()

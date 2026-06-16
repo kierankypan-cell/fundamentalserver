@@ -33,8 +33,9 @@ def _qid(roleid: int, zoneid: int) -> str:
 
 def save(roleid: int, zoneid: int, country: str | None,
          start_ymd: str, end_ymd: str,
-         df_in: pd.DataFrame, df_out: pd.DataFrame) -> str:
-    """落盘一条收信审查查询，返回 qid。"""
+         df_in: pd.DataFrame, df_out: pd.DataFrame,
+         scope: str = "all") -> str:
+    """落盘一条收信审查查询，返回 qid。scope 记录查询范围（all / in / out）。"""
     qid = _qid(roleid, zoneid)
     folder = HISTORY_DIR / qid
     folder.mkdir(parents=True, exist_ok=True)
@@ -55,6 +56,7 @@ def save(roleid: int, zoneid: int, country: str | None,
         "country":             country,
         "start":               start_ymd,
         "end":                 end_ymd,
+        "scope":               scope,
         "in_count":            in_count,
         "in_others_count":     in_others,
         "out_received_count":  out_count,

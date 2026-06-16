@@ -26,6 +26,14 @@ import streamlit as st
 
 
 # ============================================================
+# 查询范围（两页共用）：全部 / 仅战斗内 / 仅战斗外
+# ============================================================
+
+SCOPE_OPTIONS = ["全部", "仅战斗内", "仅战斗外"]
+SCOPE_TO_CODE = {"全部": "all", "仅战斗内": "in", "仅战斗外": "out"}
+
+
+# ============================================================
 # 表单校验
 # ============================================================
 
@@ -61,11 +69,16 @@ def _highlight_risk(row):
 # DataFrame 展示格式化
 # ============================================================
 
-def _to_display(df: pd.DataFrame) -> pd.DataFrame:
+def _to_display(df: pd.DataFrame, queried_zoneid: int | None = None) -> pd.DataFrame:
+    """
+    展示格式化。若 df 含 zoneid 列（战斗外发言按 roleid 跨区拉取时），额外展示「区服」列；
+    当传入 queried_zoneid 且存在非目标区的行时，再加一列「是否目标区服」标记。
+    """
     if df.empty:
         return df
     out = df.rename(columns={
         "time":          "时间",
+        "zoneid":        "区服",
         "content":       "原文",
         "translation":   "翻译",
         "risk_level":    "风险等级",
@@ -73,8 +86,15 @@ def _to_display(df: pd.DataFrame) -> pd.DataFrame:
         "is_shield":     "是否被屏蔽",
         "risk_reason":   "风险原因",
     })
-    cols = ["时间", "原文", "翻译", "风险等级", "风险类型", "是否被屏蔽",
-            "风险原因"]
+
+    if "区服" in out.columns and queried_zoneid is not None:
+        mismatch = out["区服"].astype("int64") != int(queried_zoneid)
+        if mismatch.any():
+            out["是否目标区服"] = mismatch.map(
+                lambda m: "⚠️ 非目标区" if m else "✅ 目标区")
+
+    cols = ["时间", "区服", "是否目标区服", "原文", "翻译", "风险等级", "风险类型",
+            "是否被屏蔽", "风险原因"]
     cols = [c for c in cols if c in out.columns]
     out  = out[cols]
     return out.sort_values(["风险等级", "时间"], ascending=[False, True]).reset_index(drop=True)

@@ -29,6 +29,8 @@ from db import (
 )
 from prompts import COUNTRY_LANGUAGE
 from ui_helpers import (
+    SCOPE_OPTIONS,
+    SCOPE_TO_CODE,
     _validate,
     _highlight_risk,
     _to_display,
@@ -136,6 +138,9 @@ with st.form("query_form"):
         with cb:
             end_d   = st.date_input("结束日期", value=date.today())
 
+    scope_label = st.radio("查询范围", SCOPE_OPTIONS, horizontal=True, key="scope")
+    scope = SCOPE_TO_CODE[scope_label]
+
     submitted = st.form_submit_button("🔍 查询", type="primary", use_container_width=True)
 
 
@@ -173,10 +178,25 @@ def _stats(df: pd.DataFrame) -> dict:
     )
 
 
-def _render_tab(df: pd.DataFrame, scene_name: str, file_prefix: str):
+def _render_tab(df: pd.DataFrame, scene_name: str, file_prefix: str,
+                queried_zoneid: int | None = None):
     if df.empty:
         st.info(f"该时间段内没有【{scene_name}】聊天记录")
         return
+
+    # ── 非目标区服提醒（仅战斗外含 zoneid 列）────────────────
+    # 一个 roleid 可在多个区有角色；按 roleid 拉取可能混入该账号在别区的发言。
+    if queried_zoneid is not None and "zoneid" in df.columns:
+        off = df[df["zoneid"].astype("int64") != int(queried_zoneid)]
+        if not off.empty:
+            n_target = len(df) - len(off)
+            other_zones = sorted(set(off["zoneid"].astype("int64").tolist()))
+            st.warning(
+                f"⚠️ 本次按 roleid 拉取到 {len(df)} 条战斗外发言，其中 **{len(off)} 条来自非目标区服**"
+                f"（你查询的区服是 `{queried_zoneid}`，匹配 {n_target} 条；"
+                f"另有其他区：{other_zones}）。同一 roleid 可能在多个区各有角色，"
+                f"这些非目标区的发言**可能不是你要查的那个角色**——明细表「是否目标区服」列已标注。"
+            )
 
     s = _stats(df)
 
@@ -217,7 +237,7 @@ def _render_tab(df: pd.DataFrame, scene_name: str, file_prefix: str):
 
     # ── 聊天明细 ──────────────────────────────────────────
     st.markdown("**📝 聊天明细**")
-    display_df = _to_display(df)
+    display_df = _to_display(df, queried_zoneid)
     _render_chat_table_view(
         display_df,
         highlight_fn = _highlight_risk,
@@ -234,18 +254,27 @@ def _render_tab(df: pd.DataFrame, scene_name: str, file_prefix: str):
     )
 
 
-def _build_excel(df_in: pd.DataFrame, df_out: pd.DataFrame) -> bytes:
+def _build_excel(df_in: pd.DataFrame, df_out: pd.DataFrame,
+                 scope: str = "all", queried_zoneid: int | None = None) -> bytes:
+    """scope 决定空 sheet 的占位文案：被本次查询排除时显示「未查询」而非「无记录」。
+    queried_zoneid 传给战斗外，使导出也带「区服 / 是否目标区服」标记。"""
+    in_empty_hint  = ("（本次未查询该场景）" if scope == "out"
+                      else "该时间段内无战斗内聊天")
+    out_empty_hint = ("（本次未查询该场景）" if scope == "in"
+                      else "该时间段内无战斗外聊天")
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         if not df_in.empty:
             _to_display(df_in).to_excel(writer, sheet_name="战斗内", index=False)
         else:
-            pd.DataFrame([{"提示": "该时间段内无战斗内聊天"}]).to_excel(
+            pd.DataFrame([{"提示": in_empty_hint}]).to_excel(
                 writer, sheet_name="战斗内", index=False)
         if not df_out.empty:
-            _to_display(df_out).to_excel(writer, sheet_name="战斗外", index=False)
+            _to_display(df_out, queried_zoneid).to_excel(
+                writer, sheet_name="战斗外", index=False)
         else:
-            pd.DataFrame([{"提示": "该时间段内无战斗外聊天"}]).to_excel(
+            pd.DataFrame([{"提示": out_empty_hint}]).to_excel(
                 writer, sheet_name="战斗外", index=False)
     buf.seek(0)
     return buf.getvalue()
@@ -256,11 +285,15 @@ def _render_results(meta: dict, df_in: pd.DataFrame, df_out: pd.DataFrame):
     country   = meta.get("country") or "?"
     lang_hint = COUNTRY_LANGUAGE.get((country or "").upper(), "未知")
     ts        = meta.get("ts", "")[:19].replace("T", " ")
+    scope     = meta.get("scope", "all")    # 旧历史无此字段，默认全部
+    show_in   = scope in ("all", "in")
+    show_out  = scope in ("all", "out")
 
+    scope_note = {"in": "（仅战斗内）", "out": "（仅战斗外）"}.get(scope, "")
     st.markdown(
         f"### 玩家 `{meta['roleid']}` (zone `{meta['zoneid']}`) · "
         f"国家 `{country}`（主要语言：{lang_hint}） · "
-        f"`{meta['start']}` → `{meta['end']}`"
+        f"`{meta['start']}` → `{meta['end']}` {scope_note}"
     )
     st.caption(f"查询时间：{ts}")
 
@@ -270,12 +303,15 @@ def _render_results(meta: dict, df_in: pd.DataFrame, df_out: pd.DataFrame):
 
     st.markdown("---")
     st.subheader("📋 总览结论")
-    st.markdown(
-        f"- {_summary(df_in,  '**战斗内**')}\n"
-        f"- {_summary(df_out, '**战斗外**')}"
-    )
+    bullets = []
+    if show_in:
+        bullets.append(f"- {_summary(df_in,  '**战斗内**')}")
+    if show_out:
+        bullets.append(f"- {_summary(df_out, '**战斗外**')}")
+    st.markdown("\n".join(bullets))
 
-    excel_bytes = _build_excel(df_in, df_out)
+    q_zone = int(meta["zoneid"])
+    excel_bytes = _build_excel(df_in, df_out, scope, q_zone)
     st.download_button(
         label     = "📦 导出完整报告 (Excel · 双 Sheet)",
         data      = excel_bytes,
@@ -286,12 +322,17 @@ def _render_results(meta: dict, df_in: pd.DataFrame, df_out: pd.DataFrame):
     )
 
     st.markdown("---")
-    tab_in, tab_out = st.tabs(["⚔️ 战斗内", "🌐 战斗外"])
     file_stem = f"chat_audit_{meta['roleid']}_{meta['zoneid']}_{meta['start']}_{meta['end']}"
-    with tab_in:
+    if show_in and show_out:
+        tab_in, tab_out = st.tabs(["⚔️ 战斗内", "🌐 战斗外"])
+        with tab_in:
+            _render_tab(df_in,  "战斗内",  f"{file_stem}_in")
+        with tab_out:
+            _render_tab(df_out, "战斗外",  f"{file_stem}_out", queried_zoneid=q_zone)
+    elif show_in:
         _render_tab(df_in,  "战斗内",  f"{file_stem}_in")
-    with tab_out:
-        _render_tab(df_out, "战斗外",  f"{file_stem}_out")
+    else:
+        _render_tab(df_out, "战斗外",  f"{file_stem}_out", queried_zoneid=q_zone)
 
 
 # ============================================================
@@ -326,7 +367,7 @@ if submitted:
         try:
             status.update(label="并发执行：geoip 检测 + 战斗内 + 战斗外...")
             country, df_out, df_in = query_user_chats(
-                roleid, zoneid, start_ymd, end_ymd
+                roleid, zoneid, start_ymd, end_ymd, scope
             )
 
             if country:
@@ -383,7 +424,8 @@ if submitted:
             st.stop()
 
     # 落盘 + 切到新记录 → rerun 后从磁盘读取并渲染（统一渲染路径）
-    qid = history.save(roleid, zoneid, country, start_ymd, end_ymd, df_in, df_out)
+    qid = history.save(roleid, zoneid, country, start_ymd, end_ymd,
+                       df_in, df_out, scope=scope)
     st.session_state.history = history.list_all()
     st.session_state.view_id = qid
     st.rerun()

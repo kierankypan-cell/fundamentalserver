@@ -206,21 +206,28 @@ def _summary_received(df: pd.DataFrame, scene_name: str) -> str:
 
 def build_excel_received(df_in: pd.DataFrame,
                          df_out: pd.DataFrame,
-                         roleid: int) -> bytes:
+                         roleid: int,
+                         scope: str = "all") -> bytes:
+    """scope 决定空 sheet 的占位文案：被本次查询排除时显示「未查询」而非「无记录」。"""
+    in_empty_hint  = ("（本次未查询该场景）" if scope == "out"
+                      else "该时间段内无战斗内聊天")
+    out_empty_hint = ("（本次未查询该场景）" if scope == "in"
+                      else "该时间段内无战斗外收件")
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         if not df_in.empty:
             _to_display_received_in(df_in, roleid).to_excel(
                 writer, sheet_name="战斗内整局", index=False)
         else:
-            pd.DataFrame([{"提示": "该时间段内无战斗内聊天"}]).to_excel(
+            pd.DataFrame([{"提示": in_empty_hint}]).to_excel(
                 writer, sheet_name="战斗内整局", index=False)
 
         if not df_out.empty:
             _to_display_received_out(df_out).to_excel(
                 writer, sheet_name="战斗外收件", index=False)
         else:
-            pd.DataFrame([{"提示": "该时间段内无战斗外收件"}]).to_excel(
+            pd.DataFrame([{"提示": out_empty_hint}]).to_excel(
                 writer, sheet_name="战斗外收件", index=False)
     buf.seek(0)
     return buf.getvalue()
