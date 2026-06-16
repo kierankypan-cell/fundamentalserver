@@ -344,7 +344,15 @@ def query_received_in_battle(roleid: int,
 
 def query_received_out_battle(roleid: int, zoneid: int,
                               start_ymd: str, end_ymd: str) -> pd.DataFrame:
-    """战斗外：私聊收到（target = roleid 且 sender != roleid，排除自己发给自己的边界情况）。"""
+    """
+    战斗外：私聊收到（target = roleid 且 sender != roleid，排除自己发给自己的边界情况）。
+
+    注意：本表每行是「以发送者视角」落的打点 —— roleid==sender、zoneid==发送者所在区。
+    收信场景按 target 过滤时，行里的 zoneid 属于「对方（发送者）」而非本玩家，
+    且私聊跨区很常见，所以这里**不能**再加 zoneid 过滤，否则会把别区发来的私聊全部漏掉
+    （实测会直接 0 条）。target 是全局唯一玩家 ID，单独过滤即可定位。
+    zoneid 形参仅为与 query_out_battle 对齐保留，本函数不使用。
+    """
     sql = f"""
         SELECT
             time,
@@ -356,7 +364,6 @@ def query_received_out_battle(roleid: int, zoneid: int,
             is_shield
         FROM ml_ods.gameserver_chat_talk_v2
         WHERE logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
-          AND zoneid = {int(zoneid)}
           AND target = {int(roleid)}
           AND sender != {int(roleid)}
         ORDER BY time
