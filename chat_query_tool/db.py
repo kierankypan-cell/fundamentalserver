@@ -315,6 +315,66 @@ def query_user_chats(roleid: int, zoneid: int,
 
 
 # ============================================================
+# 私聊审查（玩家点对点私聊）—— 双向单表查询
+# ============================================================
+#
+# 私聊只发生在战斗外表 gameserver_chat_talk_v2。本表每行以「发送者视角」落点：
+#   roleid==sender、zoneid==发送者所在区。私聊跨区常见，行内 zoneid 属于发送方，
+#   因此**不能**按输入 zoneid 过滤（会把别区私聊全部漏掉，实测会直接 0 条）；
+#   zoneid 仅用于 geoip 国家检测与展示。
+#
+# 「私聊」沿用项目既有约定：target 为某个真实玩家 ID（收信审查已用 target=roleid 判私聊收件）。
+# 这里对称地把双向都拉出来：
+#   我方发出：sender = roleid AND target <> 0 AND target <> roleid
+#   对方发来：target = roleid AND sender <> roleid
+# 「私聊对象」由上层按「行内非 roleid 的那一方」推断（发出取 target，收到取 sender）。
+# ============================================================
+
+def query_private_out_battle(roleid: int, zoneid: int,
+                             start_ymd: str, end_ymd: str) -> pd.DataFrame:
+    """拉取该玩家所有点对点私聊（双向）。zoneid 形参仅为与其它查询对齐，本函数不参与过滤。"""
+    sql = f"""
+        SELECT
+            time,
+            zoneid,
+            sender,
+            target,
+            chat_type,
+            chat_language,
+            content,
+            is_shield
+        FROM ml_ods.gameserver_chat_talk_v2
+        WHERE logymd BETWEEN '{start_ymd}' AND '{end_ymd}'
+          AND (
+                (sender = {int(roleid)} AND target IS NOT NULL
+                     AND target <> 0 AND target <> {int(roleid)})
+             OR (target = {int(roleid)} AND sender <> {int(roleid)})
+              )
+        ORDER BY time
+    """
+    return _run_sql(sql)
+
+
+def query_private_chats(roleid: int, zoneid: int,
+                        start_ymd: str, end_ymd: str
+                        ) -> tuple[str | None, pd.DataFrame]:
+    """
+    并发执行 country + 私聊（双向）两条 SQL，返回 (country, df)。
+
+    与 query_user_chats / query_received_chats 不同：私聊只有战斗外一个场景，
+    因此返回单张 DataFrame、无 scope 参数。country 始终查询（翻译语言提示 + 页头展示）。
+
+    调用方仍需自行 try_acquire_slot() / release_slot() 管理配额。
+    """
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_country = ex.submit(query_country,            roleid, zoneid, start_ymd, end_ymd)
+        f_chats   = ex.submit(query_private_out_battle, roleid, zoneid, start_ymd, end_ymd)
+        country = f_country.result()
+        df      = f_chats.result()
+    return country, df
+
+
+# ============================================================
 # 收信审查（玩家被骚扰）—— 三条镜像 SQL
 # ============================================================
 #
