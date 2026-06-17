@@ -1,0 +1,15 @@
+# Streamlit 网页框架
+streamlit>=1.40
+
+# 数据处理 + Excel/CSV 导出
+pandas
+openpyxl
+
+# 读取 .env 文件
+python-dotenv
+
+# Kyuubi / Hive 连接：pyhive 通过 thrift + thrift_sasl 走 LDAP
+# 不要装 sasl（C 扩展，Py3.10+ 编译挂）；thrift_sasl 会自动用 pure-sasl 纯 Python 实现
+pyhive
+thrift
+thrift_sasl

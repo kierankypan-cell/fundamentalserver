@@ -1,0 +1,11 @@
+.env
+history/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+*.err
+.git/
+.gitignore
+DEPLOY.md

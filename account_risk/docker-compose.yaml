@@ -1,0 +1,33 @@
+# Compose 文件：本地启动 / 内网服务器部署都能用
+#   首次/更新：docker compose up -d --build
+#   看日志：   docker compose logs -f
+#   停掉：    docker compose down
+
+services:
+  account-risk:
+    build: .
+    image: account-risk:latest
+    container_name: account-risk
+
+    # 宿主机端口 : 容器端口。和 chat-audit(8501) 同机部署时记得改宿主机端口，例如 "8502:8501"
+    ports:
+      - "8502:8501"
+
+    # 注入本目录 .env（KYUUBI_*）。.env 不入镜像/仓库（见 .dockerignore / .gitignore）
+    env_file:
+      - .env
+
+    # 数据持久化：查询历史落盘目录，容器重建不丢
+    volumes:
+      - ./history:/app/history
+
+    restart: unless-stopped
+
+    environment:
+      - TZ=Asia/Shanghai
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
