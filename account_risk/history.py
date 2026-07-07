@@ -21,7 +21,7 @@ import pandas as pd
 
 HISTORY_DIR = Path(__file__).parent / "history"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-MAX_HISTORY = 20
+MAX_HISTORY = 50   # 共享落盘 + 多人使用，20 条churn太快，较早记录很快被覆盖
 
 
 def _qid(roleid: int, zoneid: int) -> str:

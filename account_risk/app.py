@@ -39,21 +39,33 @@ from validators import validate_login
 
 
 def _derive_create_ymd(df_login: pd.DataFrame) -> str | None:
-    """从登录数据里取创角日（usercreatetime 已denormalize到每行，与 create_role 一致）。"""
+    """
+    取创角日（用于回到创角日 login 查创角设备）。优先用 usercreateymd 字符串：
+    它是 UTC 日期、与 login 分区键 logymd 同一口径；而 usercreatetime 会被会话时区 +8，
+    跨 UTC 零点创建的账号日期会偏，导致按 logymd 查不到创角日登录。
+    """
     if df_login is None or df_login.empty:
         return None
-    for col in ("usercreatetime", "usercreateymd"):
-        if col in df_login.columns:
-            ts = pd.to_datetime(df_login[col], errors="coerce").dropna()
-            if not ts.empty:
-                return ts.min().strftime("%Y-%m-%d")
+    if "usercreateymd" in df_login.columns:
+        s = df_login["usercreateymd"].dropna().astype(str).str.strip()
+        s = s[s.str.match(r"^\d{4}-\d{2}-\d{2}")]
+        if not s.empty:
+            return s.min()[:10]
+    if "usercreatetime" in df_login.columns:      # 兜底
+        ts = pd.to_datetime(df_login["usercreatetime"], errors="coerce").dropna()
+        if not ts.empty:
+            return ts.min().strftime("%Y-%m-%d")
     return None
 
 
 def _rebind_in_window(df_rebind: pd.DataFrame, start_ymd: str, end_ymd: str) -> pd.DataFrame:
-    """从全量 rebind 中筛出查询窗口内的（用于时间线内联展示）。"""
+    """从全量 rebind 中筛出查询窗口内的（用于时间线内联展示）。
+    按 logymd(UTC 日期分区)筛，与 login 的 WHERE logymd BETWEEN 口径一致，避免时区错位。"""
     if df_rebind is None or df_rebind.empty:
         return pd.DataFrame()
+    if "logymd" in df_rebind.columns:
+        y = df_rebind["logymd"].astype(str).str.strip()
+        return df_rebind[(y >= start_ymd) & (y <= end_ymd)].reset_index(drop=True)
     t = pd.to_datetime(df_rebind["time"], errors="coerce")
     lo = pd.Timestamp(start_ymd)
     hi = pd.Timestamp(end_ymd) + pd.Timedelta(days=1)
@@ -70,8 +82,10 @@ st.set_page_config(
     layout     = "wide",
 )
 
-if "history" not in st.session_state:
-    st.session_state.history = history.list_all()
+# 每次都从磁盘刷新历史列表：历史落盘目录是共享的（尤其服务器多人使用），
+# 别人跑新查询会裁剪掉较早的记录；缓存到 session_state 会导致侧边栏列出已被删的记录，
+# 一点就 404。每次重读（~读若干个小 meta.json，开销可忽略）保证列表与磁盘一致。
+st.session_state.history = history.list_all()
 if "view_id" not in st.session_state:
     st.session_state.view_id = None
 
@@ -293,6 +307,12 @@ if submitted:
 if st.session_state.view_id:
     try:
         meta, df_login, df_rebind = history.load(st.session_state.view_id)
+    except FileNotFoundError:
+        # 该记录已被裁剪（历史上限 MAX_HISTORY 条，较早的会被覆盖删除；多人共享时更易发生）
+        st.session_state.view_id = None
+        st.session_state.history = history.list_all()
+        st.warning(f"该历史记录已被清理（仅保留最近 {history.MAX_HISTORY} 条，"
+                   f"较早的会被新查询覆盖）。请重新查询，或点选左侧仍在的记录。")
     except Exception as e:
         st.error(f"加载历史记录失败：{e}")
         st.session_state.view_id = None

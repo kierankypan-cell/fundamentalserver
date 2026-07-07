@@ -54,6 +54,20 @@ def fmt_time(v) -> str:
     return ts.strftime("%Y/%m/%d %H:%M:%S")
 
 
+def disp_time(mr) -> str:
+    """
+    展示时间用库里原始的 logymd + loghms 拼出，避免 Presto 会话时区(Asia/Shanghai)
+    把 UTC 存储的 time 列 +8 小时导致与数据库实际时间对不上。
+    logymd='2026-06-15' + loghms='10:50:36' → '2026/06/15 10:50:36'。
+    缺失 loghms 时回退到 time 列。
+    """
+    ymd = str(mr.get("logymd", "") or "").strip()
+    hms = str(mr.get("loghms", "") or "").strip()
+    if ymd and hms and hms.lower() not in ("none", "nan"):
+        return ymd.replace("-", "/") + " " + hms
+    return fmt_time(mr.get("time"))
+
+
 # ============================================================
 # 展示列定义（req5：状态图标 + 校验结果 前置，避免左右拖动）
 # ============================================================
@@ -66,7 +80,7 @@ COL_SPECS: dict[str, tuple] = {
     "状态":         ("status",),
     "校验结果/备注": ("note",),
     "类型":         ("kind",),
-    "时间":         ("col", "time"),
+    "时间":         ("disptime",),
     "roleid":       ("roidpair",),
     "区服":         ("col", "zoneid"),
     "level":        ("col", "level"),
@@ -126,6 +140,8 @@ def _cell(mr: pd.Series, spec: tuple):
         if mr.get("_type") == "rebind":
             return mr.get("account_name", "")
         return mr.get("deviceid", "")
+    if kind == "disptime":
+        return disp_time(mr)
     if kind == "kind":
         return "🔄 切换账号" if mr.get("_type") == "rebind" else "登录"
     if kind == "status":
@@ -164,8 +180,7 @@ def build_display(merged: pd.DataFrame,
     for _, mr in merged.iterrows():
         d = {}
         for disp_name, spec in COL_SPECS.items():
-            val = _cell(mr, spec)
-            d[disp_name] = fmt_time(val) if disp_name == "时间" else val
+            d[disp_name] = _cell(mr, spec)     # 时间列在 _cell 里已用 logymd+loghms 拼好
         for c in (extra_cols or []):
             d[c] = mr.get(c, "")
         rows.append(d)
@@ -206,7 +221,7 @@ def build_rebind_display(df_rebind: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     out = df_rebind.copy()
     if "time" in out.columns:
-        out["time"] = out["time"].map(fmt_time)
+        out["time"] = out.apply(disp_time, axis=1)   # 用 logymd+loghms，同步修正时区
     cols = [c for c in _REBIND_ORDER if c in out.columns]
     cols += [c for c in out.columns if c not in cols and not c.startswith("_")]
     return out[cols].reset_index(drop=True)
