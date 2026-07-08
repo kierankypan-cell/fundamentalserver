@@ -185,7 +185,7 @@ def _render_results(meta: dict, df_login: pd.DataFrame, df_rebind: pd.DataFrame)
     st.caption(
         f"查询时间：{ts} · 登录 {len(df_login)} 条 · 全量切号 {len(df_rebind)} 条"
         f"（窗口内 {len(rb_window)} 条） · 创角设备 "
-        f"`{(info.get('create_device_id') or '未知')[:28]}…`"
+        f"`{info.get('create_device_id') or '未知'}`"
         + ("（创角日登录已过期，用最早登录设备兜底）" if info.get("create_device_fallback") else "")
     )
 

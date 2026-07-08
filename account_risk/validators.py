@@ -163,15 +163,17 @@ def check_android_deviceid(row: Mapping) -> list[str]:
     if len(uniqueid) != 32:
         reasons.append(f"device_uniqueid 应为 32 位，实际 {len(uniqueid)} 位")
 
-    ad_part = ""
+    # ad_id 的长度/格式校验只在它是「真实广告ID」（非 none/空）时做
     if not _is_empty(ad_id):
-        ad_part = ad_id
         if len(ad_id) != 36:
             reasons.append(f"ad_id 应为 36 位，实际 {len(ad_id)} 位")
         if ad_id.count("-") != 4:
             reasons.append(f"ad_id 应含 4 个 '-'，实际 {ad_id.count('-')} 个")
 
-    expected = prefix + uniqueid + android_id + ad_part
+    # deviceid = 前缀 + device_uniqueid + android_id + ad_id 的**原始值直接拼接**。
+    # ad_id 为 'none' 时，字面量 'none' 也会被拼进 deviceid（末尾 ...none），
+    # 所以这里用 ad_id 原始值比对，不能把 'none' 当空剔除，否则会误报“拼接不一致”。
+    expected = prefix + uniqueid + android_id + ad_id
     if deviceid != expected:
         reasons.append("deviceid ≠ 前缀+device_uniqueid+android_id+ad_id（拼接不一致）")
     return reasons
