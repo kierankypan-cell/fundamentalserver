@@ -360,7 +360,16 @@ def _build_table_html(merged: pd.DataFrame, visible: list[bool],
         "wrapH": wrap_h,
     }, ensure_ascii=False).replace("</", "<\\/")
 
-    return _STYLE + '<div id="ar-root"></div>' + "<script>\nconst AR=" + payload + ";\n" + _AR_JS + "\n</script>"
+    # 诊断用：错误陷阱 + 首屏哨兵。脚本没执行→哨兵文字不消失；脚本报错→显示红字错误。
+    err_trap = ('<script>window.onerror=function(m,s,l,c){var r=document.getElementById("ar-root");'
+                'if(r)r.innerHTML=\'<pre style="color:#c00;white-space:pre-wrap;padding:10px">JS错误: \'+m+\'\\n@\'+(l||0)+\':\'+(c||0)+\'</pre>\';return false;};</script>')
+    # 给容器一个初始内容（脚本会替换掉）：既是加载占位，也让 components.html 每次都刷新为新内容，
+    # 避免切换记录时 iframe 复用旧内容导致空白。
+    sentinel = '<div id="ar-root"><div style="padding:16px;color:#999">加载中…</div></div>'
+    main = ("<script>\ntry{\nconst AR=" + payload + ";\n" + _AR_JS
+            + '\n}catch(e){var r=document.getElementById("ar-root");'
+              'if(r)r.innerHTML=\'<pre style="color:#c00;white-space:pre-wrap;padding:10px">\'+(e&&e.stack||e)+\'</pre>\';}\n</script>')
+    return _STYLE + err_trap + sentinel + main
 
 
 # 纯前端数据网格（运行在 components.html 的 iframe 内）：

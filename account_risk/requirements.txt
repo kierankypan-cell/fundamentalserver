@@ -1,5 +1,7 @@
 # Streamlit 网页框架
-streamlit>=1.40
+# 钉在 1.49.1：1.5x 起 st.components.v1.html(iframe) 有渲染回归（切换记录时空白）+ use_container_width 弃用；
+# 1.49.1 稳定可用。升级前务必先验证时间线表格能正常渲染。
+streamlit==1.49.1
 
 # 数据处理 + Excel/CSV 导出
 pandas
